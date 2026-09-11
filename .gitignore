@@ -1,0 +1,6 @@
+# OCR working / temp outputs
+*.pdf
+*.png
+*.txt
+!README*
+.DS_Store
