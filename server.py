@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-The "notre propre serveur" half of the mandant's verbatim instruction (Dockerfile in this same
-directory carries the "notre propre image" half). `ocrmypdf` is a CLI, not a service — this is a
-tiny HTTP wrapper around it, deliberately Python STDLIB ONLY (`http.server` + `subprocess` +
-`tempfile`, the exact trio the task's own brief named): the base image is already Python (its own
+A tiny HTTP wrapper around the `ocrmypdf` CLI (the Dockerfile in this same directory builds the
+image). `ocrmypdf` is a CLI, not a service — this wraps it, deliberately Python STDLIB ONLY
+(`http.server` + `subprocess` + `tempfile`): the base image is already Python (its own
 `pypdfium2` rasterizer runs in-process inside `ocrmypdf` itself), so reusing that interpreter for a
 two-endpoint wrapper needs no new dependency, no `pip install`, nothing for this Dockerfile to pin
 or patch for CVEs later. The same "no heavyweight framework for two endpoints" reasoning this
@@ -31,12 +30,12 @@ half), so this is a deliberate, from-scratch design, not a Tika-compatibility sh
                            answered the same way; keeping it means that file's own `mapOcrTextToProposal`
                            needed zero changes for this engine swap, only the URL/verb).
 
-## THE ocrmypdf INVOCATION — verified against a REAL running `jbarlow83/ocrmypdf:latest` container
-in this task's own sandbox, never guessed from `--help` text alone:
+## THE ocrmypdf INVOCATION — verified against a REAL running `jbarlow83/ocrmypdf:latest` container,
+never guessed from `--help` text alone:
 
     ocrmypdf --force-ocr --output-type none --sidecar <tmp>.txt -l <languages> --quiet <in>.pdf -
 
-  - `--force-ocr`, NOT the task brief's own suggested `--skip-text`: a REAL round-trip against a
+  - `--force-ocr`, NOT `--skip-text`: a REAL round-trip against a
     genuine TEXT-LAYER pdf-lib-drawn PDF (no scanned image at all) proved `--skip-text`'s sidecar for
     a skipped page is the literal placeholder string `[OCR skipped on page(s) 1]` — NOT the page's
     own already-digital text. That is a real regression from Tika (PDFBox read a text layer directly,
@@ -45,8 +44,8 @@ in this task's own sandbox, never guessed from `--help` text alone:
     embedded structured XML (`apply-ocr-fallback.ts`'s OWN trigger condition is "no structural XML
     found" — NOT "this is a scanned image" — so a plain-text, non-structured PDF is squarely this
     fallback's most ordinary customer, not an edge case). `--force-ocr` rasterizes EVERY page and
-    always runs Tesseract over it, so the sidecar is populated either way — verified, same sandbox:
-    a `--force-ocr` run against that same text-layer PDF correctly recognized every line. The honest
+    always runs Tesseract over it, so the sidecar is populated either way — verified: a `--force-ocr`
+    run against that same text-layer PDF correctly recognized every line. The honest
     cost, stated up front and never hidden: Tesseract reading a rasterized rendering of already-crisp
     vector text is very slightly lossier than PDFBox's own native text extraction was, and force-OCR
     is slower than skip-text's fast pass-through for that same page — both meaningfully smaller costs
