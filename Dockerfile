@@ -24,38 +24,23 @@ FROM jbarlow83/ocrmypdf:latest
 USER root
 
 # ---------------------------------------------------------------------------------------------
-# Tesseract language packs — ONE clearly-commented block, so adding a language later is ONE line.
-# The base image already ships eng/deu/fra/spa/por/chi_sim (`tesseract --list-langs`, verified
-# against a running container before writing this file) — re-listed below anyway rather than
-# assumed, so this block stays correct even if `jbarlow83/ocrmypdf`'s own upstream bundle changes;
-# `apt-get install` on an already-installed package is a verified no-op, never an error.
-#
-# This task's own required set (mandant's verbatim example: "ita,nld,rus,equ") plus this repo's
-# own primary markets (FR/PL/IT — see CLAUDE.md) plus "the world's main languages" per the task's
-# own brief: French, German, Italian, Spanish, Portuguese, Dutch, Polish, Russian — every language
-# this app's own compliance profiles already treat as a first-class market, plus Arabic and
-# Japanese as the two broadest non-Latin-script additions whose installed cost stayed small enough
-# to justify (measured, real `docker images` diff against the bare base image: +24.5 MB for ALL SIX
-# new packs below PLUS `equ` — Simplified Chinese was already free, see above). Every one of these
-# is a real Debian/Ubuntu `tesseract-ocr-*` package, verified with `apt-cache search tesseract-ocr-`
-# against this exact base image before being written here, never guessed.
+# Tesseract language packs — ALL of them. MANDANT DECISION (verbatim): "y'a 94 languages à supporter
+# https://tesseractocr.org/fr/#languages". Rather than a curated subset, install the
+# `tesseract-ocr-all` meta-package, which depends on every `tesseract-ocr-<lang>` pack Debian ships
+# — verified on THIS exact base image (`apt-cache show tesseract-ocr-all` resolves; `apt-cache search
+# '^tesseract-ocr-'` lists 162 packages: the ~94 languages plus script variants). The cost is real:
+# the full standard `tessdata` set is installed, so this image is MUCH larger than the bare base (the
+# CI build in this repo publishes it and its `/health` smoke test lists exactly what landed). That
+# cost is the explicit requirement — "support every language". Which subset a given OCR run actually
+# uses is still chosen PER REQUEST (see `OCR_DEFAULT_LANGUAGES` below), never "all ~94 at once", so
+# installing everything costs image size, not per-request accuracy.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tesseract-ocr-fra \
-    tesseract-ocr-deu \
-    tesseract-ocr-ita \
-    tesseract-ocr-spa \
-    tesseract-ocr-por \
-    tesseract-ocr-nld \
-    tesseract-ocr-pol \
-    tesseract-ocr-rus \
-    tesseract-ocr-ara \
-    tesseract-ocr-chi-sim \
-    tesseract-ocr-jpn \
+    tesseract-ocr-all \
     && rm -rf /var/lib/apt/lists/*
 
 # `equ` (Tesseract's own dedicated math-equation/formula recognition model) is NOT a Debian package
 # at all — verified: `apt-cache search tesseract-ocr-equ` returns nothing on this exact base image,
-# unlike every other language above. It is real, but distributed only as a standalone `.traineddata`
+# so even `tesseract-ocr-all` above does NOT include it. It is real, but distributed only as a `.traineddata`
 # file in the upstream `tesseract-ocr/tessdata` project (the same "standard" tessdata tier Ubuntu's
 # own `tesseract-ocr-*` packages above already use — not the newer, separately-tiered
 # `tessdata_best`/`tessdata_fast` repos, which would mix OCR quality tiers on the same install for no
@@ -73,12 +58,12 @@ COPY --chmod=755 server.py /app/server.py
 
 USER app
 
-# The default language set `ocrmypdf -l` runs with when a request does not override it — every
-# language installed above except the two broadest non-European additions (`ara`/`jpn`), which stay
-# opt-in per request (`?lang=`) rather than in the always-on default: Tesseract's own accuracy on a
-# LATIN-script document degrades slightly for every extra language folded into one `-l a+b+c+...`
-# run (more candidate dictionaries to disambiguate against), so the default is this app's actually
-# documented markets, not literally everything installed.
+# ALL ~94 languages are INSTALLED (tesseract-ocr-all above); this is just the default set
+# `ocrmypdf -l` runs with when a request doesn't override it — a sensible Latin-script subset, NOT
+# "everything at once". Tesseract's accuracy on a given document degrades slightly for every extra
+# language folded into one `-l a+b+c+...` run (more candidate dictionaries to disambiguate against),
+# so a caller gets best results by passing the document's actual language via `?lang=` (any of the
+# ~94 installed); this default just covers the app's primary markets for the common unspecified case.
 ENV OCR_DEFAULT_LANGUAGES="eng+fra+deu+ita+spa+por+nld+pol+rus"
 ENV PORT=9998
 

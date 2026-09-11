@@ -27,12 +27,16 @@ found, so an ordinary digital-text PDF is the common case).
 
 ## Languages
 
-The base image ships `eng`/`deu`/`fra`/`spa`/`por`/`chi_sim`. This image adds
-`ita nld pol rus ara chi-sim jpn` and the `equ` math model (fetched from upstream `tessdata`, as it
-isn't a Debian package), for **+24.5 MB** over the base. Adding another is one line in the
-`Dockerfile`. The always-on default is `eng+fra+deu+ita+spa+por+nld+pol+rus`
-(`OCR_DEFAULT_LANGUAGES`); the broader non-Latin packs stay opt-in per request (`?lang=`) since every
-extra language in one run slightly lowers Latin-script accuracy.
+**All ~94 Tesseract languages are installed** — via the `tesseract-ocr-all` meta-package (every
+language at <https://tesseractocr.org>, plus script variants) — and the `equ` math model on top
+(fetched from upstream `tessdata`, as it isn't a Debian package). Installing everything grows the
+image substantially (the full standard `tessdata` set); the published image's `/health` lists exactly
+what landed.
+
+The per-run default (`OCR_DEFAULT_LANGUAGES`) is a sensible Latin-script subset
+(`eng+fra+deu+ita+spa+por+nld+pol+rus`), **not** all ~94 at once — Tesseract's accuracy drops slightly
+for each extra language in a single run. Pass the document's real language(s) with `?lang=` (any
+installed code) for best results.
 
 ## Use it from Invoicerr
 
