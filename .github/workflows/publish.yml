@@ -1,0 +1,67 @@
+name: Publish OCR image
+
+# Builds the OCR image, smoke-tests /health on a real container, then pushes it to
+# ghcr.io/invoicerr-app/ocr-image. Runs on every push to main, on version tags, and on demand.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/invoicerr-app/ocr-image
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build once, load into the local daemon so the smoke test runs the EXACT image we will push.
+      - name: Build (load locally)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ocr-image:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # A real container must answer /health before anything is published — never push a broken image.
+      - name: Smoke test — /health
+        run: |
+          docker run -d --name ocr -p 9998:9998 ocr-image:ci
+          ok=""
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:9998/health >/tmp/h.json 2>/dev/null; then ok=1; break; fi
+            sleep 2
+          done
+          docker logs ocr || true
+          test -n "$ok" || { echo "::error::container never became healthy"; exit 1; }
+          cat /tmp/h.json
+          grep -q '"status":"ok"' /tmp/h.json
+          grep -q '"engine":"ocrmypdf"' /tmp/h.json
+          docker rm -f ocr
+
+      - name: Push to GHCR
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
