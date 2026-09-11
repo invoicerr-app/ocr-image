@@ -52,8 +52,9 @@ jobs:
           docker logs ocr || true
           test -n "$ok" || { echo "::error::container never became healthy"; exit 1; }
           cat /tmp/h.json
-          grep -q '"status":"ok"' /tmp/h.json
-          grep -q '"engine":"ocrmypdf"' /tmp/h.json
+          # Tolerate JSON spacing ("status": "ok") — Python's json.dumps uses ": " by default.
+          grep -qE '"status":[[:space:]]*"ok"' /tmp/h.json
+          grep -qE '"engine":[[:space:]]*"ocrmypdf"' /tmp/h.json
           docker rm -f ocr
 
       - name: Push to GHCR
