@@ -122,9 +122,10 @@ def _ocrmypdf_version() -> str:
         result = subprocess.run(
             ['ocrmypdf', '--version'], capture_output=True, text=True, timeout=10, check=True
         )
-        # Verified against a real running container: `ocrmypdf --version` prints to STDERR, not
-        # stdout (an upstream quirk, not a typo here) — checking stdout first anyway keeps this
-        # correct if a future `ocrmypdf` release moves it, without ever hard-depending on that.
+        # `ocrmypdf --version` currently prints to STDOUT (verified against a real running
+        # container, ocrmypdf 17.12.1) — checking stdout first, with stderr as a fallback, keeps
+        # this correct even if a future release moves it: this Dockerfile floats on
+        # `jbarlow83/ocrmypdf:latest`, so the exact stream isn't pinned.
         return (result.stdout.strip() or result.stderr.strip()) or 'unknown'
     except Exception:
         return 'unknown'

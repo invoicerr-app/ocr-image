@@ -27,29 +27,33 @@ found, so an ordinary digital-text PDF is the common case).
 
 ## Languages
 
-**All ~94 Tesseract languages are installed** — via the `tesseract-ocr-all` meta-package (every
-language at <https://tesseractocr.org>, plus script variants) — and the `equ` math model on top
-(fetched from upstream `tessdata`, as it isn't a Debian package). Installing everything grows the
-image substantially (the full standard `tessdata` set); the published image's `/health` lists exactly
-what landed.
+**Every Tesseract language Debian ships is installed** — via the `tesseract-ocr-all` meta-package
+(<https://tesseractocr.org> puts the project itself at "100+ languages"; the exact set is whatever
+Debian/Ubuntu resolves `tesseract-ocr-all` to at build time, not something this Dockerfile pins) —
+plus script-only models (`Cyrillic`, `Devanagari`, …) and the `equ` math model on top (fetched from
+upstream `tessdata`, as it isn't a Debian package). Installing everything grows the image
+substantially (the full standard `tessdata` set); a real build on 2026-09-21 landed 162 entries in
+`tesseract --list-langs` / `/health`'s `installedLanguages` — that endpoint, not this paragraph, is
+the current, authoritative count.
 
 The per-run default (`OCR_DEFAULT_LANGUAGES`) is a sensible Latin-script subset
-(`eng+fra+deu+ita+spa+por+nld+pol+rus`), **not** all ~94 at once — Tesseract's accuracy drops slightly
-for each extra language in a single run. Pass the document's real language(s) with `?lang=` (any
-installed code) for best results.
+(`eng+fra+deu+ita+spa+por+nld+pol+rus`), **not** all of them at once — Tesseract's accuracy drops
+slightly for each extra language in a single run. Pass the document's real language(s) with `?lang=`
+(any installed code) for best results.
 
 ## Use it from Invoicerr
 
-The main app's OCR service (`ROLE=ocr`, `OCR_ENGINE=local`) calls this container over HTTP via
-`LOCAL_OCR_URL`. It is **opt-in**: a self-hoster who doesn't enable the `ocr-local` compose profile
-gets no OCR — full-local-by-default, no key anywhere. An operator running the SaaS enables this one
-container once and every tenant gets OCR.
+The main app's local OCR provider calls this container over HTTP via `OCR_SERVICE_URL` (e.g.
+`http://ocr:9998`). The variable is unset by default, and unset is not a failure: the app treats "no
+OCR engine configured" as the honest, self-hosted-by-default outcome, not an error. It is **opt-in**:
+a self-hoster who doesn't enable the `ocr` compose profile gets no OCR — full-local-by-default, no key
+anywhere. An operator running the SaaS enables this one container once and every tenant gets OCR.
 
 ```yaml
-# invoicerr docker-compose.yml (profile: ocr-local)
-ocr-local-engine:
+# invoicerr docker-compose.yml (profile: ocr)
+ocr:
   image: ghcr.io/invoicerr-app/ocr-image:latest
-  profiles: ["ocr-local"]
+  profiles: ["ocr"]
 ```
 
 ```bash
