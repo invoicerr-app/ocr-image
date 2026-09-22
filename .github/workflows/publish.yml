@@ -21,6 +21,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # QEMU lets the amd64 runner build and run the arm64 variant.
+      - uses: docker/setup-qemu-action@v3
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
@@ -37,8 +40,8 @@ jobs:
           context: .
           load: true
           tags: ocr-image:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=amd64
+          cache-to: type=gha,mode=max,scope=amd64
 
       # A real container must answer /health before anything is published — never push a broken image.
       - name: Smoke test — /health
@@ -57,12 +60,43 @@ jobs:
           grep -qE '"engine":[[:space:]]*"ocrmypdf"' /tmp/h.json
           docker rm -f ocr
 
+      # Same check on arm64, run under QEMU: a multi-arch push must not ship an untested variant.
+      - name: Build arm64 (load locally)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          tags: ocr-image:ci-arm64
+          cache-from: type=gha,scope=arm64
+          cache-to: type=gha,mode=max,scope=arm64
+
+      - name: Smoke test — /health (arm64)
+        run: |
+          docker run -d --platform linux/arm64 --name ocr -p 9998:9998 ocr-image:ci-arm64
+          ok=""
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:9998/health >/tmp/h.json 2>/dev/null; then ok=1; break; fi
+            sleep 2
+          done
+          docker logs ocr || true
+          test -n "$ok" || { echo "::error::container never became healthy"; exit 1; }
+          cat /tmp/h.json
+          # Tolerate JSON spacing ("status": "ok") — Python's json.dumps uses ": " by default.
+          grep -qE '"status":[[:space:]]*"ok"' /tmp/h.json
+          grep -qE '"engine":[[:space:]]*"ocrmypdf"' /tmp/h.json
+          docker rm -f ocr
+
       - name: Push to GHCR
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}
-          cache-from: type=gha
+          # One cache scope per arch, otherwise the second build's export overwrites the first's.
+          cache-from: |
+            type=gha,scope=amd64
+            type=gha,scope=arm64
