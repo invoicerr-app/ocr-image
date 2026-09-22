@@ -1,6 +1,7 @@
 name: Publish OCR image
 
-# Builds the OCR image, smoke-tests /health on a real container, then pushes it to
+# Builds the OCR image natively per architecture (amd64 + arm64 runners, in parallel), smoke-tests
+# /health on a real container of each, then publishes one multi-arch manifest to
 # ghcr.io/invoicerr-app/ocr-image. Runs on every push to main, on version tags, and on demand.
 on:
   push:
@@ -16,13 +17,19 @@ env:
   IMAGE: ghcr.io/invoicerr-app/ocr-image
 
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
-
-      # QEMU lets the amd64 runner build and run the arm64 variant.
-      - uses: docker/setup-qemu-action@v3
 
       - uses: docker/setup-buildx-action@v3
 
@@ -38,10 +45,11 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: ${{ matrix.platform }}
           load: true
           tags: ocr-image:ci
-          cache-from: type=gha,scope=amd64
-          cache-to: type=gha,mode=max,scope=amd64
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
       # A real container must answer /health before anything is published — never push a broken image.
       - name: Smoke test — /health
@@ -60,43 +68,52 @@ jobs:
           grep -qE '"engine":[[:space:]]*"ocrmypdf"' /tmp/h.json
           docker rm -f ocr
 
-      # Same check on arm64, run under QEMU: a multi-arch push must not ship an untested variant.
-      - name: Build arm64 (load locally)
+      # Pushed by digest only (no tag); the merge job below ties both digests into one manifest.
+      - name: Push by digest
+        id: push
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/arm64
-          load: true
-          tags: ocr-image:ci-arm64
-          cache-from: type=gha,scope=arm64
-          cache-to: type=gha,mode=max,scope=arm64
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
 
-      - name: Smoke test — /health (arm64)
+      - name: Export digest
         run: |
-          docker run -d --platform linux/arm64 --name ocr -p 9998:9998 ocr-image:ci-arm64
-          ok=""
-          for i in $(seq 1 90); do
-            if curl -fsS http://localhost:9998/health >/tmp/h.json 2>/dev/null; then ok=1; break; fi
-            sleep 2
-          done
-          docker logs ocr || true
-          test -n "$ok" || { echo "::error::container never became healthy"; exit 1; }
-          cat /tmp/h.json
-          # Tolerate JSON spacing ("status": "ok") — Python's json.dumps uses ": " by default.
-          grep -qE '"status":[[:space:]]*"ok"' /tmp/h.json
-          grep -qE '"engine":[[:space:]]*"ocrmypdf"' /tmp/h.json
-          docker rm -f ocr
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
 
-      - name: Push to GHCR
-        uses: docker/build-push-action@v6
+      - uses: actions/upload-artifact@v4
         with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.IMAGE }}:latest
-            ${{ env.IMAGE }}:${{ github.sha }}
-          # One cache scope per arch, otherwise the second build's export overwrites the first's.
-          cache-from: |
-            type=gha,scope=amd64
-            type=gha,scope=arm64
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  merge:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish multi-arch manifest
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            -t "$IMAGE:latest" -t "$IMAGE:$GITHUB_SHA" \
+            $(printf "$IMAGE@sha256:%s " *)
+          docker buildx imagetools inspect "$IMAGE:latest"
